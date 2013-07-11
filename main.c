@@ -30,6 +30,10 @@
 
 #define JOY_DEV "/dev/input/js2"
 
+
+// Defines for yaw integration:
+#define YAW_INT_CONST    0.03 
+
 uint32_t crc32(unsigned char const *p, uint32_t len)
 {
 	int i;
@@ -69,6 +73,11 @@ int main(int argc, char* argv[])
     js_packet_t js_packet;
 
     uint64_t last_time_stamp = 0;
+
+    int32_t yaw_i = 0;
+    int32_t yaw_d = 0;
+    int32_t update = 0;
+
 
     //open joystick device
     if( ( joy_fd = open( JOY_DEV , O_RDONLY)) == -1 )
@@ -127,18 +136,37 @@ int main(int argc, char* argv[])
         switch (js.type & ~JS_EVENT_INIT)
         {
         case JS_EVENT_AXIS:
-            js_packet.axis[ js.number ] = js.value;
+            // Handle yaw values differently:
+            if (js.number == 0) {
+                yaw_d = js.value;
+            }
+            else {
+                js_packet.axis[ js.number ] = js.value;
+            }
             break;
         }
-        // set yaw to 0 for the time being...
-        js_packet.axis[0] = 0;
-
       usleep(1000);
 
 	// send command to the drone
         if(microsSinceEpoch() - last_time_stamp > 40000) //CD: Changed this to 200000 instead of 40000
         {
             last_time_stamp = microsSinceEpoch();
+            
+            // Integrate Yaw Value:
+            update = YAW_INT_CONST * yaw_d;
+            yaw_i = yaw_i + update;
+
+            // Check if the value is above INT16_MAX or below INT16_MIN:
+            while (yaw_i < INT16_MIN) {
+                yaw_i += 65536;
+            }
+            while (yaw_i > INT16_MAX) {
+                yaw_i -= 65536;
+            }
+            js_packet.axis[0] = (int16_t) yaw_i;
+
+            printf("js_packet.axis[0]: %i \tyaw: %i\tupdate: %i\n",js_packet.axis[0], yaw_d, update);
+            // yaw integration done
 
             //write packet to TCP socket / write the sliders and buttons information 
             // Calculate CRC32 Checksum:
